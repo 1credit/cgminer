@@ -17,7 +17,6 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <poll.h>
 #ifndef WIN32
   #include <sys/select.h>
   #include <termios.h>
@@ -363,7 +362,7 @@ static bool zeus_read_response(struct cgpu_info *zeus, const unsigned char *evtp
 	uint32_t nonce, chip, core;
 	bool valid;
 
-	memcpy(&nonce, evtpkt, sizeof(evtpkt));
+	memcpy(&nonce, evtpkt, ZEUS_EVENT_PKT_LEN);
 	nonce = be32toh(nonce);
 
 	if (info->current_work == NULL) {	// work was flushed before we read response

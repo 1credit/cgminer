@@ -39,7 +39,9 @@
 #ifndef WIN32
 #include <sys/resource.h>
 #else
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#undef WIN32_LEAN_AND_MEAN
 #endif
 #include <ccan/opt/opt.h>
 #include <jansson.h>
@@ -5958,7 +5960,11 @@ static void hashmeter(int thr_id, double hashes_done)
 	decay_time(&rolling1, hashes_done, tv_tdiff, 60.0);
 	decay_time(&rolling5, hashes_done, tv_tdiff, 300.0);
 	decay_time(&rolling15, hashes_done, tv_tdiff, 900.0);
+#ifndef WIN32
 	global_hashrate = llround(total_rolling) * 1000000;
+#else
+	global_hashrate = (unsigned long long)lround(total_rolling) * 1000000;	// MinGW(non64) is missing llround
+#endif
 	total_secs = tdiff(&total_tv_end, &total_tv_start);
 	if (showlog) {
 		char displayed_hashes[16], displayed_rolling[16];
