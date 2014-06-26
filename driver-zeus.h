@@ -28,8 +28,6 @@
 
 struct ZEUS_INFO {
 	char		device_name[24];
-	int		device_fd;
-	int		using_libusb;
 
 	unsigned int	nonce_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
 	unsigned int	error_count[ZEUS_MAX_CHIPS][ZEUS_CHIP_CORES];
@@ -50,8 +48,7 @@ struct ZEUS_INFO {
 	struct thr_info	*thr;
 	pthread_t	pth_io;
 	pthread_mutex_t	lock;
-	int		wu_pipefd[2];		// inter-thread pipe from miner on work flush
-	int		zm_pipefd[2];		// inter-thread pipe from device I/O thread
+	cgsem_t		wusem;
 
 	struct work	*current_work;
 
