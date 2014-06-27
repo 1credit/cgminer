@@ -907,6 +907,15 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	double elapsed_s;
 	int64_t estimate_hashes;
 
+	if (thr->work_restart || thr->work_update) {
+		mutex_lock(&info->lock);
+		zeus_purge_work(zeus);
+		notify_io_thread(zeus);
+		mutex_unlock(&info->lock);
+		thr->work_restart = false;
+		thr->work_update = false;
+	}
+
 	mutex_lock(&info->lock);
 	zeus_read_response(zeus);	// reads either from serial or libusb// and times out after ~250 ms
 	mutex_unlock(&info->lock);
