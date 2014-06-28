@@ -7876,13 +7876,13 @@ void hash_driver_work(struct thr_info *mythr)
 		struct timeval diff;
 		int64_t hashes;
 
-#if !defined(USE_AVALON2) && !defined(USE_ZEUS)
+#ifndef USE_AVALON2
 		mythr->work_update = false;
 #endif
 
 		hashes = drv->scanwork(mythr);
 
-#if !defined(USE_AVALON2) && !defined(USE_ZEUS)
+#ifndef USE_AVALON2
 		/* Reset the bool here in case the driver looks for it
 		 * synchronously in the scanwork loop. */
 		mythr->work_restart = false;

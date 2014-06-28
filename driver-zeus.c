@@ -624,10 +624,14 @@ static bool zeus_detect_one_serial(const char *devpath)
 static void zeus_purge_work(struct cgpu_info *zeus)
 {
 	struct ZEUS_INFO *info = zeus->device_data;
+
+	mutex_lock(&info->lock);
 	if (info->current_work != NULL) {
 		free_work(info->current_work);
 		info->current_work = NULL;
 	}
+	notify_io_thread(zeus);
+	mutex_unlock(&info->lock);
 }
 
 #define nonce_range_start(cperc, cmax, core, chip) \
@@ -665,6 +669,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 	memcpy(&nonce, evtpkt, sizeof(evtpkt));
 	nonce = be32toh(nonce);
 
+	mutex_lock(&info->lock);
+
 	if (info->current_work == NULL) {	// work was flushed before we read response
 		applog(LOG_DEBUG, "%s%d: Received nonce for flushed work",
 			zeus->drv->name, zeus->device_id);
@@ -673,12 +679,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 
 	valid = submit_nonce(info->thr, info->current_work, nonce);
 
-	//info->hashes_per_ms = (nonce % (0xffffffff / info->cores_per_chip / info->chips_count)) * info->cores_per_chip * info->chips_count / ms_tdiff(&info->workend, &info->workstart);
-	//applog(LOG_INFO, "hashes_per_ms: %d", info->hashes_per_ms);
-
 	++info->workdone;
 
-	//chip = chip_index(nonce, info->chips_bit_num);
 	core = (nonce & 0xe0000000) >> 29;		// core indicated by 3 highest bits
 	chip = (nonce & 0x1ff80000) >> (29 - info->chips_bit_num);
 	duration_ms = ms_tdiff(&info->workend, &info->workstart);
@@ -696,6 +698,8 @@ static bool zeus_read_response(struct cgpu_info *zeus)
 		applog(LOG_INFO, "%s%d: Corrupt nonce message received, cannot determine chip and core",
 			zeus->drv->name, zeus->device_id);
 	}
+
+	mutex_unlock(&info->lock);
 
 	return true;
 }
@@ -779,18 +783,18 @@ static void *zeus_io_thread(void *data)
 						zeus->drv->name, zeus->device_id, threadname);
 
 	while (likely(!zeus->shutdown)) {
-		mutex_lock(&info->lock);
 		if (unlikely(info->serial_reopen)) {
+			mutex_lock(&info->lock);
 			if (using_serial(info) && !zeus_reopen(zeus)) {
 				applog(LOG_ERR, "Failed to reopen %s%d on %s, shutting down",
 					zeus->drv->name, zeus->device_id, zeus->device_path);
 				mutex_unlock(&info->lock);
 				break;
 			}
-			zeus_purge_work(zeus);
 			info->serial_reopen = false;
+			mutex_unlock(&info->lock);
+			zeus_purge_work(zeus);
 		}
-		mutex_unlock(&info->lock);
 
 		zeus_check_need_work(zeus);
 
@@ -827,16 +831,8 @@ static void *zeus_io_thread(void *data)
 		}
 
 		retval = cgsem_mswait(&info->wusem, (tv_rem.tv_sec < 1) ? 5000 : tv_rem.tv_sec * 1000);
-		if (retval < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-		if (retval == ETIMEDOUT) {
-			mutex_lock(&info->lock);
+		if (retval == ETIMEDOUT)
 			zeus_purge_work(zeus);		// abandon current work
-			mutex_unlock(&info->lock);
-		}
 	}
 
 	zeus->shutdown = true;
@@ -849,7 +845,10 @@ static void *zeus_io_thread(void *data)
 
 static int zeus_autoscan()
 {
-	return serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR);
+	int found = 0;
+	found += serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR1);
+	found += serial_autodetect_udev(zeus_detect_one_serial, ZEUS_USB_ID_MODEL_STR2);
+	return found;
 }
 
 static void zeus_detect(bool __maybe_unused hotplug)
@@ -907,18 +906,13 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 	double elapsed_s;
 	int64_t estimate_hashes;
 
+	zeus_read_response(zeus);       // reads either from serial or libusb or times out
+
 	if (thr->work_restart || thr->work_update) {
-		mutex_lock(&info->lock);
 		zeus_purge_work(zeus);
-		notify_io_thread(zeus);
-		mutex_unlock(&info->lock);
 		thr->work_restart = false;
 		thr->work_update = false;
 	}
-
-	mutex_lock(&info->lock);
-	zeus_read_response(zeus);	// reads either from serial or libusb// and times out after ~250 ms
-	mutex_unlock(&info->lock);
 
 	mutex_lock(&info->lock);
 	old_scanwork_time = info->scanwork_time;
@@ -941,11 +935,7 @@ static int64_t zeus_scanwork(struct thr_info *thr)
 #define zeus_update_work zeus_flush_work
 static void zeus_flush_work(struct cgpu_info *zeus)
 {
-	struct ZEUS_INFO *info = zeus->device_data;
-	mutex_lock(&info->lock);
 	zeus_purge_work(zeus);
-	notify_io_thread(zeus);
-	mutex_unlock(&info->lock);
 	if (opt_zeus_debug)
 		applog(LOG_INFO, "zeus_flush_work: Tickling I/O thread");
 }
@@ -1043,10 +1033,7 @@ static char *zeus_set_device(struct cgpu_info *zeus, char *option, char *setting
 			return replybuf;
 		}
 
-		mutex_lock(&info->lock);
 		zeus_purge_work(zeus);
-		notify_io_thread(zeus);
-		mutex_unlock(&info->lock);
 		return NULL;
 	}
 
